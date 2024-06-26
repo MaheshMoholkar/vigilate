@@ -1,7 +1,7 @@
 
 # Vigilate
 
-A dead simple monitoring service, intended to replace things like Nagios.
+A dead simple monitoring service.
 
 ## Build
 
