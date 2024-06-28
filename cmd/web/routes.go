@@ -23,9 +23,8 @@ func routes() http.Handler {
 
 	mux.Get("/user/logout", handlers.Repo.Logout)
 
-	mux.Get("/pusher-test", handlers.Repo.TestPusher)
-
 	// Pusher
+	mux.Get("/pusher-test", handlers.Repo.TestPusher)
 	mux.Route("/pusher", func(mux chi.Router) {
 		mux.Use(Auth)
 		mux.Post("/auth", handlers.Repo.PusherAuth)
@@ -64,6 +63,7 @@ func routes() http.Handler {
 		// hosts
 		mux.Get("/host/all", handlers.Repo.AllHosts)
 		mux.Get("/host/{id}", handlers.Repo.Host)
+		mux.Post("/host/{id}", handlers.Repo.PostHost)
 	})
 
 	// static files

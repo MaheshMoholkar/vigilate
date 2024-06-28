@@ -2,6 +2,11 @@ package handlers
 
 import (
 	"fmt"
+	"log"
+	"net/http"
+	"runtime/debug"
+	"strconv"
+
 	"github.com/CloudyKit/jet/v6"
 	"github.com/go-chi/chi"
 	"github.com/tsawler/vigilate/internal/config"
@@ -10,13 +15,9 @@ import (
 	"github.com/tsawler/vigilate/internal/models"
 	"github.com/tsawler/vigilate/internal/repository"
 	"github.com/tsawler/vigilate/internal/repository/dbrepo"
-	"log"
-	"net/http"
-	"runtime/debug"
-	"strconv"
 )
 
-//Repo is the repository
+// Repo is the repository
 var Repo *DBRepo
 var app *config.AppConfig
 
@@ -127,10 +128,54 @@ func (repo *DBRepo) AllHosts(w http.ResponseWriter, r *http.Request) {
 
 // Host shows the host add/edit form
 func (repo *DBRepo) Host(w http.ResponseWriter, r *http.Request) {
-	err := helpers.RenderPage(w, r, "host", nil, nil)
+	id, _ := strconv.Atoi(chi.URLParam(r, "id"))
+
+	var h models.Host
+
+	if id > 0 {
+		// get the host from the database
+	}
+	vars := make(jet.VarMap)
+	vars.Set("host", h)
+
+	err := helpers.RenderPage(w, r, "host", vars, nil)
 	if err != nil {
 		printTemplateError(w, err)
 	}
+}
+
+// PostHost handles posting of host formm
+func (repo *DBRepo) PostHost(w http.ResponseWriter, r *http.Request) {
+	id, _ := strconv.Atoi(chi.URLParam(r, "id"))
+
+	var h models.Host
+	var hostID int
+
+	if id > 0 {
+		// get the host from the database
+	} else {
+		h.HostName = r.Form.Get("host_name")
+		h.CanonicalName = r.Form.Get("canonical_name")
+		h.URL = r.Form.Get("url")
+		h.IP = r.Form.Get("ip")
+		h.IPV6 = r.Form.Get("ipv6")
+		h.Location = r.Form.Get("location")
+		h.OS = r.Form.Get("os")
+		active, _ := strconv.Atoi(r.Form.Get("active"))
+		h.Active = active
+
+		newID, err := repo.DB.InsertHost(h)
+		if err != nil {
+			log.Println(err)
+			helpers.ServerError(w, r, err)
+			return
+		}
+		hostID = newID
+	}
+
+	repo.App.Session.Put(r.Context(), "flash", "Changes Saved")
+
+	http.Redirect(w, r, fmt.Sprintf("/admin/host/%d", hostID), http.StatusSeeOther)
 }
 
 // AllUsers lists all admin users
@@ -273,5 +318,5 @@ func show500(w http.ResponseWriter, r *http.Request) {
 }
 
 func printTemplateError(w http.ResponseWriter, err error) {
-	_, _ = fmt.Fprint(w, fmt.Sprintf(`<small><span class='text-danger'>Error executing template: %s</span></small>`, err))
+	_, _ = fmt.Fprintf(w, "<small><span class='text-danger'>Error executing template: %s</span></small>", err)
 }
