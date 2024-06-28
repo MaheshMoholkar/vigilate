@@ -1,14 +1,14 @@
 {{extends "./layouts/layout.jet"}}
 
 {{block css()}}
-    <style>
+<style>
 
-    </style>
+</style>
 {{end}}
 
 
 {{block cardTitle()}}
-    Hosts
+Hosts
 {{end}}
 
 
@@ -34,16 +34,30 @@
 
         <table class="table table-condensed table-striped">
             <thead>
-            <tr>
-                <th>Host</th>
-                <th>Services</th>
-                <th>OS</th>
-                <th>Location</th>
-                <th>Status</th>
-            </tr>
+                <tr>
+                    <th>Host</th>
+                    <th>Services</th>
+                    <th>OS</th>
+                    <th>Location</th>
+                    <th>Status</th>
+                </tr>
             </thead>
             <tbody>
-
+                {{range hosts}}
+                <tr>
+                    <td><a href="/admin/host/{{.ID}}">{{.HostName}}</a></td>
+                    <td></td>
+                    <td>{{.OS}}</td>
+                    <td>{{.Location}}</td>
+                    <td>
+                        {{if .Active == 1}}
+                        <span class="badge bg-success">Active</span>
+                        {{else}}
+                        <span class="badge bg-danger">Inactive</span>
+                        {{end}}
+                    </td>
+                </tr>
+                {{end}}
             </tbody>
         </table>
     </div>
