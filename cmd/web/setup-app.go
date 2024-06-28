@@ -3,6 +3,11 @@ package main
 import (
 	"flag"
 	"fmt"
+	"log"
+	"net/http"
+	"os"
+	"time"
+
 	"github.com/alexedwards/scs/postgresstore"
 	"github.com/alexedwards/scs/v2"
 	"github.com/pusher/pusher-http-go"
@@ -11,10 +16,6 @@ import (
 	"github.com/tsawler/vigilate/internal/driver"
 	"github.com/tsawler/vigilate/internal/handlers"
 	"github.com/tsawler/vigilate/internal/helpers"
-	"log"
-	"net/http"
-	"os"
-	"time"
 )
 
 func setupApp() (*string, error) {
@@ -31,7 +32,7 @@ func setupApp() (*string, error) {
 	dbSsl := flag.String("dbssl", "disable", "database ssl setting")
 	pusherHost := flag.String("pusherHost", "", "pusher host")
 	pusherPort := flag.String("pusherPort", "443", "pusher port")
-	pusherApp := flag.String("pusherApp", "9", "pusher app id")
+	pusherApp := flag.String("pusherApp", "1", "pusher app id")
 	pusherKey := flag.String("pusherKey", "", "pusher key")
 	pusherSecret := flag.String("pusherSecret", "", "pusher secret")
 	pusherSecure := flag.Bool("pusherSecure", false, "pusher server uses SSL (true or false)")
