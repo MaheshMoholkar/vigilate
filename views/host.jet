@@ -140,17 +140,20 @@ Host
                                     </tr>
                                 </thead>
                                 <tbody>
+                                    {{range host.HostServices}}
                                     <tr>
-                                        <td>HTTP</td>
+                                        <td>{{.Service.ServiceName}}</td>
                                         <td>
                                             <div class="form-check form-switch">
-                                                <input class="form-check-input" value="1" type="checkbox"
-                                                    id="http_service" data-type="toggle-service" data-service="1"
-                                                    data-host-id="{{host.ID}}" name="http">
+                                                <input class="form-check-input" value="1" {{if .Active==1}} checked
+                                                    {{end}} type="checkbox" data-type="toggle-service"
+                                                    data-service="{{.ServiceID}}" data-host-id="{{.HostID}}"
+                                                    name="{{.Service.ServiceName}}">
                                                 <label class="form-check-label" for="active">Active</label>
                                             </div>
                                         </td>
                                     </tr>
+                                    {{end}}
                                 </tbody>
                             </table>
                         </div>
@@ -199,7 +202,14 @@ Host
                 fetch("/admin/host/ajax/toggle-service", {
                     method: "POST",
                     body: formData,
-                }).then(res => res.json()).then(data => alert("Service Updated"))
+                }).then(res => res.json()).then(data => {
+                    if (data.ok) {
+                        successAlert("Changes Saved")
+                    } else {
+                        errorAlert("Something went wrong!")
+                    }
+                }
+                )
             })
         }
     })
