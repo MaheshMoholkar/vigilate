@@ -132,6 +132,27 @@ func (m *postgresDBRepo) UpdateHost(h models.Host) error {
 	return nil
 }
 
+func (m *postgresDBRepo) GetAllServicesStatusCounts() (int, int, int, int, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	query := `
+	select (select count(id) from host_services where active = 1 and status = 'pending') as pending,
+		(select count(id) from host_services where active = 1 and status = 'healthy') as healthy,
+		(select count(id) from host_services where active = 1 and status = 'warning') as warning,
+		(select count(id) from host_services where active = 1 and status = 'problem') as problem`
+
+	var pending, healthy, warning, problem int
+
+	row := m.DB.QueryRowContext(ctx, query)
+	err := row.Scan(&pending, &healthy, &warning, &problem)
+	if err != nil {
+		return 0, 0, 0, 0, err
+	}
+
+	return pending, healthy, warning, problem, nil
+}
+
 func (m *postgresDBRepo) AllHosts() ([]models.Host, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
@@ -166,6 +187,32 @@ func (m *postgresDBRepo) AllHosts() ([]models.Host, error) {
 			log.Println(err)
 			return nil, err
 		}
+
+		serviceQuery := `select hs.id, hs.host_id, hs.service_id, hs.active, hs.schedule_number, hs.schedule_unit, hs.last_check, hs.status, hs.created_at, hs.updated_at, s.id, s.service_name, s.active, s.icon, s.created_at, s.updated_at
+		from host_services hs 
+			left join services s on (s.id = hs.service_id) 
+		where host_id = $1`
+
+		serviceRows, err := m.DB.QueryContext(ctx, serviceQuery, h.ID)
+		if err != nil {
+			log.Println(err)
+			return nil, err
+		}
+
+		var hostServices []models.HostService
+		for serviceRows.Next() {
+			var hs models.HostService
+			err = serviceRows.Scan(
+				&hs.ID, &hs.HostID, &hs.ServiceID, &hs.Active, &hs.ScheduleNumber, &hs.ScheduleUnit, &hs.LastCheck, &hs.Status, &hs.CreatedAt, &hs.UpdatedAt, &hs.Service.ID, &hs.Service.ServiceName, &hs.Service.Active, &hs.Service.Icon, &hs.Service.CreatedAt, &hs.Service.UpdatedAt,
+			)
+			if err != nil {
+				log.Println(err)
+				return nil, err
+			}
+			hostServices = append(hostServices, hs)
+			serviceRows.Close()
+		}
+		h.HostServices = hostServices
 		hosts = append(hosts, h)
 	}
 

@@ -2,6 +2,7 @@ package dbrepo
 
 import (
 	"database/sql"
+
 	"github.com/tsawler/vigilate/internal/config"
 	"github.com/tsawler/vigilate/internal/repository"
 )
@@ -16,6 +17,7 @@ type postgresDBRepo struct {
 // NewPostgresRepo creates the repository
 func NewPostgresRepo(Conn *sql.DB, a *config.AppConfig) repository.DatabaseRepo {
 	app = a
+	_ = app
 	return &postgresDBRepo{
 		App: a,
 		DB:  Conn,
