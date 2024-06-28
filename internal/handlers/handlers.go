@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
@@ -347,4 +348,28 @@ func show500(w http.ResponseWriter, r *http.Request) {
 
 func printTemplateError(w http.ResponseWriter, err error) {
 	_, _ = fmt.Fprintf(w, "<small><span class='text-danger'>Error executing template: %s</span></small>", err)
+}
+
+type serviceJSON struct {
+	OK bool `json:"ok"`
+}
+
+func (repo *DBRepo) ToggleServiceForHost(w http.ResponseWriter, r *http.Request) {
+	err := r.ParseForm()
+	if err != nil {
+		log.Println(err)
+	}
+
+	hostID, _ := strconv.Atoi(r.Form.Get("host_id"))
+	serviceID, _ := strconv.Atoi(r.Form.Get("service_id"))
+	active, _ := strconv.Atoi(r.Form.Get("active"))
+
+	log.Print("Data: ", hostID, serviceID, active)
+
+	var resp serviceJSON
+	resp.OK = true
+
+	out, _ := json.MarshalIndent(resp, "", " ")
+	w.Header().Set("Content-Type", "application/json")
+	w.Write(out)
 }

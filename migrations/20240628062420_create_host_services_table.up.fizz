@@ -3,8 +3,9 @@ create_table("host_services"){
     t.Column("host_id", "integer", {})
     t.Column("service_id", "integer", {})
     t.Column("active", "integer", {"default":1})
-    t.column("schedule_number", "integer", {"default":3})
-    t.column("schedule_unit", "integer", {"default":"m"})
+    t.Column("schedule_number", "integer", {"default":3})
+    t.Column("schedule_unit", "string", {"default":"m"})
+    t.Column("status", "string", {"default": "pending"})
     t.Column("last_check", "timestamp", {"default":"0001-01-01 00:00:001"})
 }
 
