@@ -183,8 +183,8 @@ Host
 {{ block js() }}
 
 <script>
-
     document.addEventListener("DOMContentLoaded", function () {
+
         let toggles = document.querySelectorAll("[data-service]")
         for (let i = 0; i < toggles.length; i++) {
             toggles[i].addEventListener("change", function () {
