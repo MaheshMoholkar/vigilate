@@ -31,32 +31,68 @@
         // update tables
 
         // remove existing table row if exist
-        let exists = !!document.getElementById("host-service-"+data.host_service_id)
-        if (exists) {
-            let row = document.getElementById("host-service-"+data.host_service_id)
-            row.parentNode.removeChild(row)
-        }
+        deleteHostServiceRow(data.host_service_id)
 
         // update tables
+        updateHostServiceRow(data)
+    })
+
+    function deleteHostServiceRow(hostServiceID){
+        let exists = !!document.getElementById("host-service-"+hostServiceID)
+        if (exists) {
+            let row = document.getElementById("host-service-"+hostServiceID)
+            row.parentNode.removeChild(row)
+
+            // if this was the last row, add a "no services" row
+
+            let tables = ["healthy", "pending", "warning", "problem"]
+
+            for(let i=0; i<table.length; i++){
+                let currentTableExists = !!document.getElementById(tables[i] + "-table")
+                if(currentTableExists){
+                    let currentTable = document.getElementById(tables[i]+"-table")
+
+                    if(currentTable.rows.length === 1) {
+                        let newRow = currentTable.tBodies[0].insertRow(-1)
+                        let newCell = newRow.insertCell(0)
+                        newCell.setAttribute("colspan", "3")
+                        newCell.innerHTML = "No services"
+                    }
+                }
+            }
+        }
+
+    }
+    
+    function updateHostServiceRow(data){
         let tableExists = !!document.getElementById(data.status + "-table")
         if(tableExists){
             let tableRef = document.getElementById(data.status+"-table")
+
+            // delete "no services" row
+            let tableContent = tableRef.innerHTML;
+            if(tableContent.includes("No services")){
+                let rowCount = tableRef.rows.length
+                for (let i = rowCount - 1; i > 0; i--){
+                    tableRef.deleteRow(i)
+                }
+            }
+
+            // insert new row and add id
             let newRow = tableRef.tBodies[0].insertRow(-1)
 
             newRow.setAttribute("id", "host-service-"+data.host_service_id)
 
             // insert the first td
             let newCell = newRow.insertCell(0)
-            newCell.innerHTML = `<span class="${data.icon}"></span>
-            ${data.service_name}
-            <span class="badge bg-secondary ml-4" style="cursor: pointer;"
-                onclick="checkNow(${data.host_service_id}, '${data.status}')">Check Now
-            </span>`
+            newCell.innerHTML = `<a href="/admin/host/${data.host_service_id}#healthy-content">
+                            ${data.host_name}
+                        </a>`
 
             // insert second td
             newCell = newRow.insertCell(1)
             if(data.status !== "pending"){
-                newCell.innerHTML = `${data.last_check}`
+                newCell.innerHTML = `${data.service_name}`
             } else {
                 newCell.innerHTML = "Pending..."
             }
@@ -64,7 +100,7 @@
             // insert third td
             newCell = newRow.insertCell(2)
         }   
-    })
+    }
 
     publicChannel.bind("host-service-count-changed", function(data){
         let healthyCountExists = !!document.getElementById("healthy_count")
