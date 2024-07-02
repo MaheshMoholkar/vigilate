@@ -303,9 +303,11 @@ func (m *postgresDBRepo) GetHostServiceByID(id int) (models.HostService, error) 
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 
-	query := `select hs.id, hs.host_id, hs.service_id, hs.active, hs.schedule_number, hs.schedule_unit, hs.last_check, hs.status, hs.created_at, hs.updated_at, s.id, s.service_name, s.active, s.icon, s.created_at, s.updated_at
+	query := `select hs.id, hs.host_id, hs.service_id, hs.active, hs.schedule_number, hs.schedule_unit, hs.last_check, hs.status, hs.created_at, hs.updated_at, s.id, s.service_name, s.active, s.icon, s.created_at, s.updated_at, h.host_name
 	from host_services hs
-	left join services s on (hs.service_id = s.id) where hs.id = $1`
+	left join services s on (hs.service_id = s.id)
+	left join hosts h on (hs.host_id = h.id) 
+	where hs.id = $1`
 
 	var hs models.HostService
 
@@ -327,6 +329,7 @@ func (m *postgresDBRepo) GetHostServiceByID(id int) (models.HostService, error) 
 		&hs.Service.Icon,
 		&hs.Service.CreatedAt,
 		&hs.Service.UpdatedAt,
+		&hs.HostName,
 	)
 	if err != nil {
 		log.Println(err)
