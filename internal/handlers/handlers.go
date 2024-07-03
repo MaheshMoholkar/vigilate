@@ -8,14 +8,15 @@ import (
 	"runtime/debug"
 	"strconv"
 
-	"github.com/CloudyKit/jet/v6"
-	"github.com/go-chi/chi/v5"
 	"github.com/tsawler/vigilate/internal/config"
 	"github.com/tsawler/vigilate/internal/driver"
 	"github.com/tsawler/vigilate/internal/helpers"
 	"github.com/tsawler/vigilate/internal/models"
 	"github.com/tsawler/vigilate/internal/repository"
 	"github.com/tsawler/vigilate/internal/repository/dbrepo"
+
+	"github.com/CloudyKit/jet/v6"
+	"github.com/go-chi/chi/v5"
 )
 
 // Repo is the repository
@@ -44,9 +45,11 @@ func NewPostgresqlHandlers(db *driver.DB, a *config.AppConfig) *DBRepo {
 
 // AdminDashboard displays the dashboard
 func (repo *DBRepo) AdminDashboard(w http.ResponseWriter, r *http.Request) {
-	pending, healthy, warning, problem, err := repo.DB.GetAllServicesStatusCounts()
+	// get all service status counts
+	pending, healthy, warning, problem, err := repo.DB.GetAllServiceStatusCount()
 	if err != nil {
 		log.Println(err)
+		ClientError(w, r, http.StatusInternalServerError)
 		return
 	}
 
@@ -59,8 +62,10 @@ func (repo *DBRepo) AdminDashboard(w http.ResponseWriter, r *http.Request) {
 	allHosts, err := repo.DB.AllHosts()
 	if err != nil {
 		log.Println(err)
+		ClientError(w, r, http.StatusInternalServerError)
 		return
 	}
+
 	vars.Set("hosts", allHosts)
 
 	err = helpers.RenderPage(w, r, "dashboard", vars, nil)
@@ -71,7 +76,17 @@ func (repo *DBRepo) AdminDashboard(w http.ResponseWriter, r *http.Request) {
 
 // Events displays the events page
 func (repo *DBRepo) Events(w http.ResponseWriter, r *http.Request) {
-	err := helpers.RenderPage(w, r, "events", nil, nil)
+	events, err := repo.DB.GetAllEvents()
+	if err != nil {
+		log.Println(err)
+		ClientError(w, r, http.StatusBadRequest)
+		return
+	}
+
+	data := make(jet.VarMap)
+	data.Set("events", events)
+
+	err = helpers.RenderPage(w, r, "events", data, nil)
 	if err != nil {
 		printTemplateError(w, err)
 	}
@@ -134,13 +149,14 @@ func (repo *DBRepo) PostSettings(w http.ResponseWriter, r *http.Request) {
 
 // AllHosts displays list of all hosts
 func (repo *DBRepo) AllHosts(w http.ResponseWriter, r *http.Request) {
-
 	hosts, err := repo.DB.AllHosts()
 	if err != nil {
 		log.Println(err)
+		ClientError(w, r, http.StatusBadRequest)
 		return
 	}
 
+	// send data to the template
 	vars := make(jet.VarMap)
 	vars.Set("hosts", hosts)
 
@@ -155,15 +171,16 @@ func (repo *DBRepo) Host(w http.ResponseWriter, r *http.Request) {
 	id, _ := strconv.Atoi(chi.URLParam(r, "id"))
 
 	var h models.Host
-
 	if id > 0 {
 		host, err := repo.DB.GetHostByID(id)
 		if err != nil {
 			log.Println(err)
+			ClientError(w, r, http.StatusBadRequest)
 			return
 		}
 		h = host
 	}
+
 	vars := make(jet.VarMap)
 	vars.Set("host", h)
 
@@ -173,22 +190,21 @@ func (repo *DBRepo) Host(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// PostHost handles posting of host formm
+// PostHost adds/edits a host
 func (repo *DBRepo) PostHost(w http.ResponseWriter, r *http.Request) {
 	id, _ := strconv.Atoi(chi.URLParam(r, "id"))
 
 	var h models.Host
 
 	if id > 0 {
-		// get the host from the database
 		host, err := repo.DB.GetHostByID(id)
 		if err != nil {
 			log.Println(err)
+			ClientError(w, r, http.StatusBadRequest)
 			return
 		}
 		h = host
 	}
-
 	h.HostName = r.Form.Get("host_name")
 	h.CanonicalName = r.Form.Get("canonical_name")
 	h.URL = r.Form.Get("url")
@@ -196,28 +212,164 @@ func (repo *DBRepo) PostHost(w http.ResponseWriter, r *http.Request) {
 	h.IPV6 = r.Form.Get("ipv6")
 	h.Location = r.Form.Get("location")
 	h.OS = r.Form.Get("os")
-	active, _ := strconv.Atoi(r.Form.Get("active"))
-	h.Active = active
+	h.Active, _ = strconv.Atoi(r.Form.Get("active"))
 
 	if id > 0 {
 		err := repo.DB.UpdateHost(h)
 		if err != nil {
 			log.Println(err)
+			ClientError(w, r, http.StatusBadRequest)
 			return
 		}
 	} else {
 		newID, err := repo.DB.InsertHost(h)
 		if err != nil {
 			log.Println(err)
-			helpers.ServerError(w, r, err)
+			ClientError(w, r, http.StatusBadRequest)
 			return
 		}
 		h.ID = newID
 	}
 
-	repo.App.Session.Put(r.Context(), "flash", "Changes Saved")
-
+	repo.App.Session.Put(r.Context(), "flash", "Changes saved")
 	http.Redirect(w, r, fmt.Sprintf("/admin/host/%d", h.ID), http.StatusSeeOther)
+}
+
+type serviceJSON struct {
+	OK bool `json:"ok"`
+}
+
+// ToggleServiceForHost toggles a service for a host
+func (repo *DBRepo) ToggleServiceForHost(w http.ResponseWriter, r *http.Request) {
+	err := r.ParseForm()
+	if err != nil {
+		log.Println(err)
+		ClientError(w, r, http.StatusBadRequest)
+		return
+	}
+
+	var resp serviceJSON
+	resp.OK = true
+
+	hostID, _ := strconv.Atoi(r.Form.Get("host_id"))
+	serviceID, _ := strconv.Atoi(r.Form.Get("service_id"))
+	active, _ := strconv.Atoi(r.Form.Get("active"))
+
+	err = repo.DB.UpdateHostServiceStatus(hostID, serviceID, active)
+	if err != nil {
+		log.Println(err)
+		resp.OK = false
+		return
+	}
+
+	// broadcast
+	hs, err := repo.DB.GetHostServiceByHostIDServiceID(hostID, serviceID)
+	if err != nil {
+		log.Println(err)
+		resp.OK = false
+		return
+	}
+	h, err := repo.DB.GetHostByID(hostID)
+	if err != nil {
+		log.Println(err)
+		resp.OK = false
+		return
+	}
+
+	// add or remove host service from scheduler
+	if active == 1 {
+		// add to scheduler
+		repo.pushScheduleChangedEvent(hs, "pending")
+		repo.pushStatusChangedEvent(h, hs, "pending")
+		repo.addToMonitorMap(hs)
+	} else {
+		// remove from scheduler
+		repo.removeFromMonitorMap(hs)
+	}
+
+	out, _ := json.MarshalIndent(resp, "", "    ")
+	w.Header().Set("Content-Type", "application/json")
+
+	_, _ = w.Write(out)
+}
+
+// SetSystemPreference sets a system preference
+func (repo *DBRepo) SetSystemPreference(w http.ResponseWriter, r *http.Request) {
+	prefName := r.PostForm.Get("pref_name")
+	prefValue := r.PostForm.Get("pref_value")
+
+	var resp JSONResponse
+	resp.OK = true
+	resp.Message = ""
+
+	err := repo.DB.UpdateSystemPref(prefName, prefValue)
+	if err != nil {
+		resp.OK = false
+		resp.Message = err.Error()
+	}
+
+	repo.App.PreferenceMap["monitoring_live"] = prefValue
+
+	out, err := json.MarshalIndent(resp, "", "    ")
+	if err != nil {
+		log.Println(err)
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_, _ = w.Write(out)
+}
+
+func (repo *DBRepo) ToggleMonitoring(w http.ResponseWriter, r *http.Request) {
+	enabled := r.PostForm.Get("enabled")
+
+	if enabled == "1" {
+		// start monitoring
+		log.Println("Turning on monitoring")
+		repo.App.PreferenceMap["monitoring_live"] = "1"
+		repo.StartMonitoring()
+		repo.App.Scheduler.Start()
+	} else {
+		// stop all monitoring
+		log.Println("Turning off monitoring")
+		repo.App.PreferenceMap["monitoring_live"] = "0"
+
+		// remove all items in map from schedule
+		for _, x := range repo.App.MonitorMap {
+			repo.App.Scheduler.Remove(x)
+		}
+
+		// empty map
+		for k := range repo.App.MonitorMap {
+			delete(repo.App.MonitorMap, k)
+		}
+
+		// delete all entries from schedule
+		for _, i := range repo.App.Scheduler.Entries() {
+			repo.App.Scheduler.Remove(i.ID)
+		}
+
+		repo.App.Scheduler.Stop()
+
+		data := make(map[string]string)
+		data["message"] = "Monitoring is off!"
+
+		err := app.WsClient.Trigger("public-channel", "app-stopping", data)
+		if err != nil {
+			log.Println(err)
+		}
+	}
+
+	var resp JSONResponse
+	resp.OK = true
+	resp.Message = ""
+
+	out, err := json.MarshalIndent(resp, "", "    ")
+	if err != nil {
+		log.Println(err)
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_, _ = w.Write(out)
 }
 
 // AllUsers lists all admin users
@@ -360,105 +512,5 @@ func show500(w http.ResponseWriter, r *http.Request) {
 }
 
 func printTemplateError(w http.ResponseWriter, err error) {
-	_, _ = fmt.Fprintf(w, "<small><span class='text-danger'>Error executing template: %s</span></small>", err)
-}
-
-type serviceJSON struct {
-	OK bool `json:"ok"`
-}
-
-func (repo *DBRepo) ToggleServiceForHost(w http.ResponseWriter, r *http.Request) {
-	err := r.ParseForm()
-	if err != nil {
-		log.Println(err)
-	}
-
-	var resp serviceJSON
-	resp.OK = true
-
-	hostID, _ := strconv.Atoi(r.Form.Get("host_id"))
-	serviceID, _ := strconv.Atoi(r.Form.Get("service_id"))
-	active, _ := strconv.Atoi(r.Form.Get("active"))
-
-	err = repo.DB.UpdateHostServiceStatus(hostID, serviceID, active)
-	if err != nil {
-		log.Println(err)
-		resp.OK = false
-	}
-
-	out, _ := json.MarshalIndent(resp, "", " ")
-	w.Header().Set("Content-Type", "application/json")
-	w.Write(out)
-}
-
-func (repo *DBRepo) SetSystemPref(w http.ResponseWriter, r *http.Request) {
-	prefName := r.PostForm.Get("pref_name")
-	prefValue := r.PostForm.Get("pref_value")
-
-	var resp jsonResp
-	resp.OK = true
-	resp.Message = ""
-
-	err := repo.DB.UpdateSystemPref(prefName, prefValue)
-	if err != nil {
-		resp.OK = false
-		resp.Message = err.Error()
-	}
-
-	repo.App.PreferenceMap["monitoring_live"] = prefValue
-
-	out, _ := json.MarshalIndent(resp, "", " ")
-
-	w.Header().Set("Content-Type", "application/json")
-	w.Write(out)
-}
-
-// ToggleMonitoring turns monitoring on/off
-func (repo *DBRepo) ToggleMonitoring(w http.ResponseWriter, r *http.Request) {
-	enabled := r.PostForm.Get("enabled")
-
-	if enabled == "1" {
-		// start monitoring
-		log.Println("Turning monitoring on")
-		repo.App.PreferenceMap["monitoring_live"] = "1"
-		repo.StartMonitoring()
-
-		repo.App.Scheduler.Start()
-	} else {
-		// stop monitoring
-		log.Println("Turning monitoring off")
-		repo.App.PreferenceMap["monitoring_live"] = "0"
-
-		// remove all items in map from schedule
-		for _, x := range repo.App.MonitorMap {
-			repo.App.Scheduler.Remove(x)
-		}
-
-		// empty the map
-		for k := range repo.App.MonitorMap {
-			delete(repo.App.MonitorMap, k)
-		}
-
-		// delete all entries from schedule
-		for _, i := range repo.App.Scheduler.Entries() {
-			repo.App.Scheduler.Remove(i.ID)
-		}
-
-		repo.App.Scheduler.Stop()
-
-		data := make(map[string]string)
-		data["message"] = "Monitoring is off!"
-		err := app.WsClient.Trigger("public-channel", "app-stoping", data)
-		if err != nil {
-			log.Println(err)
-		}
-	}
-
-	var resp jsonResp
-	resp.OK = true
-
-	out, _ := json.MarshalIndent(resp, "", " ")
-
-	w.Header().Set("Content-Type", "application/json")
-	w.Write(out)
+	_, _ = fmt.Fprintf(w, `<small><span class='text-danger'>Error executing template: %s</span></small>`, err)
 }

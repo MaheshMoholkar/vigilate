@@ -19,7 +19,7 @@ func (repo *DBRepo) PusherAuth(w http.ResponseWriter, r *http.Request) {
 	presenceData := pusher.MemberData{
 		UserID: strconv.Itoa(userID),
 		UserInfo: map[string]string{
-			"name": u.FirstName,
+			"name": u.FirstName + " " + u.LastName,
 			"id":   strconv.Itoa(userID),
 		},
 	}
@@ -31,5 +31,5 @@ func (repo *DBRepo) PusherAuth(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	_, _ = w.Write(response)
+	w.Write(response)
 }

@@ -8,15 +8,16 @@ import (
 	"os"
 	"time"
 
-	"github.com/alexedwards/scs/postgresstore"
-	"github.com/alexedwards/scs/v2"
-	"github.com/pusher/pusher-http-go"
-	"github.com/robfig/cron/v3"
 	"github.com/tsawler/vigilate/internal/channeldata"
 	"github.com/tsawler/vigilate/internal/config"
 	"github.com/tsawler/vigilate/internal/driver"
 	"github.com/tsawler/vigilate/internal/handlers"
 	"github.com/tsawler/vigilate/internal/helpers"
+
+	"github.com/alexedwards/scs/postgresstore"
+	"github.com/alexedwards/scs/v2"
+	"github.com/pusher/pusher-http-go"
+	"github.com/robfig/cron/v3"
 )
 
 func setupApp() (*string, error) {
@@ -142,8 +143,7 @@ func setupApp() (*string, error) {
 	monitorMap := make(map[int]cron.EntryID)
 	app.MonitorMap = monitorMap
 
-	localZone, _ := time.LoadLocation("Local")
-
+	localZone, _ := time.LoadLocation("America/Sao_Paulo")
 	scheduler := cron.New(cron.WithLocation(localZone), cron.WithChain(
 		cron.DelayIfStillRunning(cron.DefaultLogger),
 		cron.Recover(cron.DefaultLogger),

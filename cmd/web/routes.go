@@ -3,8 +3,9 @@ package main
 import (
 	"net/http"
 
-	"github.com/go-chi/chi/v5"
 	"github.com/tsawler/vigilate/internal/handlers"
+
+	"github.com/go-chi/chi/v5"
 )
 
 func routes() http.Handler {
@@ -23,7 +24,6 @@ func routes() http.Handler {
 
 	mux.Get("/user/logout", handlers.Repo.Logout)
 
-	// Pusher
 	mux.Route("/pusher", func(mux chi.Router) {
 		mux.Use(Auth)
 		mux.Post("/auth", handlers.Repo.PusherAuth)
@@ -59,16 +59,17 @@ func routes() http.Handler {
 		// schedule
 		mux.Get("/schedule", handlers.Repo.ListEntries)
 
-		// preferences
-		mux.Post("/preference/ajax/set-system-pref", handlers.Repo.SetSystemPref)
-		mux.Post("/preference/ajax/toggle-monitoring", handlers.Repo.ToggleMonitoring)
+		// Preferences
+		mux.Post("/preference/set-system-pref", handlers.Repo.SetSystemPreference)
+		mux.Post("/preference/toggle-monitoring", handlers.Repo.ToggleMonitoring)
 
 		// hosts
 		mux.Get("/host/all", handlers.Repo.AllHosts)
 		mux.Get("/host/{id}", handlers.Repo.Host)
 		mux.Post("/host/{id}", handlers.Repo.PostHost)
-		mux.Post("/host/ajax/toggle-service", handlers.Repo.ToggleServiceForHost)
-		mux.Get("/perform-check/{id}/{oldStatus}", handlers.Repo.TestCheck)
+		mux.Post("/host/toggle-service", handlers.Repo.ToggleServiceForHost)
+
+		mux.Get("/perform-check/{id}/{oldstatus}", handlers.Repo.PerformCheck)
 	})
 
 	// static files

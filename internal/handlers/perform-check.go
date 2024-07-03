@@ -9,15 +9,21 @@ import (
 	"strings"
 	"time"
 
-	"github.com/go-chi/chi/v5"
 	"github.com/tsawler/vigilate/internal/models"
+
+	"github.com/go-chi/chi/v5"
 )
 
 const (
+	// HTTP is the id for the http service
 	HTTP = 1
+	// HTTPS is the id for the https service
+	HTTPS = 2
+	// SSLCertificate is the id for the ssl certificate service
+	SSLCertificate = 3
 )
 
-type jsonResp struct {
+type JSONResponse struct {
 	OK            bool      `json:"ok"`
 	Message       string    `json:"message"`
 	ServiceID     int       `json:"service_id"`
@@ -28,8 +34,10 @@ type jsonResp struct {
 	LastCheck     time.Time `json:"last_check"`
 }
 
-// ScheduledCheck performs a scheduled check on a host service
+// ScheduledCheck performs a check on a host service by id
 func (repo *DBRepo) ScheduledCheck(hostServiceID int) {
+	log.Println("***** running check for host service id", hostServiceID)
+
 	hs, err := repo.DB.GetHostServiceByID(hostServiceID)
 	if err != nil {
 		log.Println(err)
@@ -42,7 +50,7 @@ func (repo *DBRepo) ScheduledCheck(hostServiceID int) {
 		return
 	}
 
-	// test the service
+	// tests the services
 	newStatus, msg := repo.testServiceForHost(h, hs)
 
 	if newStatus != hs.Status {
@@ -51,18 +59,18 @@ func (repo *DBRepo) ScheduledCheck(hostServiceID int) {
 
 }
 
-func (repo *DBRepo) updateHostServiceStatusCount(_ models.Host, hs models.HostService, newStatus, _ string) {
-	// update host service record in db
+func (repo *DBRepo) updateHostServiceStatusCount(h models.Host, hs models.HostService, newStatus, msg string) {
+	// update host service record in database with status if changed and last check
 	hs.Status = newStatus
+	hs.LastMessage = msg
 	hs.LastCheck = time.Now()
-
 	err := repo.DB.UpdateHostService(hs)
 	if err != nil {
 		log.Println(err)
 		return
 	}
 
-	pending, healthy, warning, problem, err := repo.DB.GetAllServicesStatusCounts()
+	pending, healthy, warning, problem, err := repo.DB.GetAllServiceStatusCount()
 	if err != nil {
 		log.Println(err)
 		return
@@ -71,23 +79,29 @@ func (repo *DBRepo) updateHostServiceStatusCount(_ models.Host, hs models.HostSe
 	data := make(map[string]string)
 	data["healthy_count"] = strconv.Itoa(healthy)
 	data["pending_count"] = strconv.Itoa(pending)
-	data["problem_count"] = strconv.Itoa(problem)
 	data["warning_count"] = strconv.Itoa(warning)
-	repo.broadcastMessage("public-channel", "host-service-count-changed", data)
+	data["problem_count"] = strconv.Itoa(problem)
 
+	repo.broadcastMessage("public-channel", "host-service-counts-changed", data)
+
+	log.Println("***** new status is", newStatus)
+	log.Println("***** message is", msg)
 }
 
 func (repo *DBRepo) broadcastMessage(channel, messageType string, data map[string]string) {
-
 	err := app.WsClient.Trigger(channel, messageType, data)
 	if err != nil {
 		log.Println(err)
 	}
 }
 
-func (repo *DBRepo) TestCheck(w http.ResponseWriter, r *http.Request) {
-	hostServiceID, _ := strconv.Atoi(chi.URLParam(r, "id"))
-	oldStatus := chi.URLParam(r, "oldStatus")
+func (repo *DBRepo) PerformCheck(w http.ResponseWriter, r *http.Request) {
+	hostServiceID, err := strconv.Atoi(chi.URLParam(r, "id"))
+	if err != nil {
+		printTemplateError(w, err)
+		return
+	}
+	oldStatus := chi.URLParam(r, "oldstatus")
 	okay := true
 
 	// get host service
@@ -97,18 +111,39 @@ func (repo *DBRepo) TestCheck(w http.ResponseWriter, r *http.Request) {
 		okay = false
 	}
 
-	// get the host
-	h, err := repo.DB.GetHostByID(hs.HostID)
+	// get host
+	host, err := repo.DB.GetHostByID(hs.HostID)
 	if err != nil {
 		log.Println(err)
 		okay = false
 	}
 
 	// test the service
-	newStatus, msg := repo.testServiceForHost(h, hs)
+	newStatus, msg := repo.testServiceForHost(host, hs)
 
-	// update the host service
+	// save event to database
+	err = repo.DB.InsertEvent(models.Events{
+		EventType:     newStatus,
+		HostServiceID: hs.ID,
+		HostID:        hs.HostID,
+		ServiceName:   hs.Service.ServiceName,
+		HostName:      hs.HostName,
+		Message:       msg,
+		CreatedAt:     time.Now(),
+		UpdatedAt:     time.Now(),
+	})
+	if err != nil {
+		log.Println(err)
+	}
+
+	// broadcast service status change to pusher
+	if newStatus != hs.Status {
+		repo.pushStatusChangedEvent(host, hs, newStatus)
+	}
+
+	// update the host service in database if status has changed and last check
 	hs.Status = newStatus
+	hs.LastMessage = msg
 	hs.LastCheck = time.Now()
 	hs.UpdatedAt = time.Now()
 
@@ -117,13 +152,11 @@ func (repo *DBRepo) TestCheck(w http.ResponseWriter, r *http.Request) {
 		log.Println(err)
 		okay = false
 	}
-	// broadcast service
 
-	//send json to client
-	var resp jsonResp
-
+	// create json
+	var resp JSONResponse
 	if okay {
-		resp = jsonResp{
+		resp = JSONResponse{
 			OK:            true,
 			Message:       msg,
 			ServiceID:     hs.ServiceID,
@@ -135,44 +168,140 @@ func (repo *DBRepo) TestCheck(w http.ResponseWriter, r *http.Request) {
 		}
 	} else {
 		resp.OK = false
-		resp.Message = "Something went wrong"
+		resp.Message = "error getting host service"
 	}
 
-	out, _ := json.MarshalIndent(resp, "", " ")
+	// send json to client
+	out, _ := json.MarshalIndent(resp, "", "    ")
 	w.Header().Set("Content-Type", "application/json")
-	w.Write(out)
+
+	_, err = w.Write(out)
+	if err != nil {
+		printTemplateError(w, err)
+		return
+	}
 }
 
 func (repo *DBRepo) testServiceForHost(h models.Host, hs models.HostService) (string, string) {
-	var newStatus, msg string
+	var msg, newStatus string
 
 	switch hs.ServiceID {
 	case HTTP:
 		msg, newStatus = testHTTPForHost(h.URL)
+
+	case HTTPS:
+		msg, newStatus = testHTTPSForHost(h.URL)
+
+	case SSLCertificate:
+		msg, newStatus = testSSLCertificateForHost(h.URL)
+
 	}
 
-	// broadcast to clients if appropriate
+	// broadcast to client
 	if hs.Status != newStatus {
-		data := make(map[string]string)
-		data["host_id"] = strconv.Itoa(hs.HostID)
-		data["host_service_id"] = strconv.Itoa(hs.ID)
-		data["host_name"] = h.HostName
-		data["service_name"] = hs.Service.ServiceName
-		data["icon"] = hs.Service.Icon
-		data["status"] = newStatus
-		data["message"] = fmt.Sprintf("%s on %s reports %s", hs.Service.ServiceName, h.HostName, newStatus)
-		data["last_check"] = time.Now().Format("2006-01-02 3:04:06 PM")
+		repo.pushStatusChangedEvent(h, hs, newStatus)
 
-		repo.broadcastMessage("public-channel", "host-service-status-changed", data)
+		// save event to database
+		err := repo.DB.InsertEvent(models.Events{
+			EventType:     newStatus,
+			HostServiceID: hs.ID,
+			HostID:        hs.HostID,
+			ServiceName:   hs.Service.ServiceName,
+			HostName:      hs.HostName,
+			Message:       msg,
+			CreatedAt:     time.Now(),
+			UpdatedAt:     time.Now(),
+		})
+		if err != nil {
+			log.Println(err)
+		}
 	}
 
-	// send email/sms if appropriate
+	repo.pushScheduleChangedEvent(hs, newStatus)
+
+	// TODO - send email or SMS if status if appropriate
 
 	return newStatus, msg
 }
 
+func (repo *DBRepo) pushStatusChangedEvent(h models.Host, hs models.HostService, newStatus string) {
+	data := make(map[string]string)
+	data["host_id"] = strconv.Itoa(hs.HostID)
+	data["host_service_id"] = strconv.Itoa(hs.ID)
+	data["host_name"] = h.HostName
+	data["service_name"] = hs.Service.ServiceName
+	data["icon"] = hs.Service.Icon
+	data["status"] = newStatus
+	data["message"] = fmt.Sprintf("%s on %s reports %s", hs.Service.ServiceName, h.HostName, newStatus)
+	data["last_check"] = time.Now().Format("2006-01-02 3:04:05 PM")
+
+	repo.broadcastMessage("public-channel", "host-service-status-changed", data)
+}
+
+func (repo *DBRepo) pushScheduleChangedEvent(hs models.HostService, newStatus string) {
+	// broadcast schedule-changed-event
+	yearOne := time.Date(0001, 1, 1, 0, 0, 0, 1, time.UTC)
+	data := make(map[string]string)
+	data["host_service_id"] = strconv.Itoa(hs.ID)
+	data["service_id"] = strconv.Itoa(hs.ServiceID)
+	data["host_id"] = strconv.Itoa(hs.HostID)
+
+	if app.Scheduler.Entry(repo.App.MonitorMap[hs.ID]).Next.After(yearOne) {
+		data["next_run"] = repo.App.Scheduler.Entry(repo.App.MonitorMap[hs.ID]).Next.Format("2006-01-02 3:04:05 PM")
+	} else {
+		data["next_run"] = "pending"
+	}
+	data["last_run"] = time.Now().Format("2006-01-02 3:04:05 PM")
+	data["host"] = hs.HostName
+	data["service"] = hs.Service.ServiceName
+	data["schedule"] = fmt.Sprintf("@every %d%s", hs.ScheduleNumber, hs.ScheduleUnit)
+	data["status"] = newStatus
+	data["icon"] = hs.Service.Icon
+
+	repo.broadcastMessage("public-channel", "schedule-changed-event", data)
+}
+
+func (repo *DBRepo) addToMonitorMap(hs models.HostService) {
+	// add to monitor map
+	if repo.App.PreferenceMap["monitoring_live"] == "1" {
+		var j job
+		j.HostServiceID = hs.ID
+		scheduleID, err := repo.App.Scheduler.AddJob(fmt.Sprintf("@every %d%s", hs.ScheduleNumber, hs.ScheduleUnit), &j)
+		if err != nil {
+			log.Println(err)
+			return
+		}
+
+		repo.App.MonitorMap[hs.ID] = scheduleID
+		data := make(map[string]string)
+		data["message"] = "scheduling"
+		data["host_service_id"] = strconv.Itoa(hs.ID)
+		data["next_run"] = "Pending..."
+		data["service"] = hs.Service.ServiceName
+		data["host"] = hs.HostName
+		data["last_run"] = time.Now().Format("2006-01-02 3:04:05 PM")
+		data["schedule"] = fmt.Sprintf("@every %d%s", hs.ScheduleNumber, hs.ScheduleUnit)
+
+		repo.broadcastMessage("public-channel", "schedule-changed-event", data)
+	}
+}
+
+func (repo *DBRepo) removeFromMonitorMap(hs models.HostService) {
+	// remove from monitor map
+	if repo.App.PreferenceMap["monitoring_live"] == "1" {
+		repo.App.Scheduler.Remove(repo.App.MonitorMap[hs.ID])
+		data := make(map[string]string)
+		data["host_service_id"] = strconv.Itoa(hs.ID)
+
+		repo.broadcastMessage("public-channel", "schedule-item-removed-event", data)
+	}
+}
+
+// testHTTPForHost tests the HTTP service for a host
 func testHTTPForHost(url string) (string, string) {
-	url = strings.TrimSuffix(url, "/")
+	if !strings.HasSuffix(url, "/") {
+		url = strings.TrimSuffix(url, "/")
+	}
 
 	url = strings.Replace(url, "https://", "http://", -1)
 
@@ -183,7 +312,53 @@ func testHTTPForHost(url string) (string, string) {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
+		return fmt.Sprintf("%s - %s", url, resp.Status), "problem"
+	}
+
+	return fmt.Sprintf("%s - %s", url, resp.Status), "healthy"
+}
+
+// testHTTPSForHost tests the HTTPS service for a host
+func testHTTPSForHost(url string) (string, string) {
+	if !strings.HasSuffix(url, "/") {
+		url = strings.TrimSuffix(url, "/")
+	}
+
+	url = strings.Replace(url, "http://", "https://", -1)
+
+	resp, err := http.Get(url)
+	if err != nil {
 		return fmt.Sprintf("%s - %s", url, "error connecting"), "problem"
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Sprintf("%s - %s", url, resp.Status), "problem"
+	}
+
+	return fmt.Sprintf("%s - %s", url, resp.Status), "healthy"
+}
+
+// testSSLCertificateForHost tests the SSL certificate for a host
+func testSSLCertificateForHost(url string) (string, string) {
+	if !strings.HasSuffix(url, "/") {
+		url = strings.TrimSuffix(url, "/")
+	}
+
+	url = strings.Replace(url, "http://", "https://", -1)
+
+	resp, err := http.Get(url)
+	if err != nil {
+		return fmt.Sprintf("%s - %s", url, "error connecting"), "problem"
+	}
+	defer resp.Body.Close()
+
+	if resp.TLS == nil || len(resp.TLS.PeerCertificates) == 0 {
+		return fmt.Sprintf("%s - %s", url, "no certificate found"), "problem"
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Sprintf("%s - %s", url, resp.Status), "problem"
 	}
 
 	return fmt.Sprintf("%s - %s", url, resp.Status), "healthy"

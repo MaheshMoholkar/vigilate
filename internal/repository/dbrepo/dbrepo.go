@@ -17,7 +17,6 @@ type postgresDBRepo struct {
 // NewPostgresRepo creates the repository
 func NewPostgresRepo(Conn *sql.DB, a *config.AppConfig) repository.DatabaseRepo {
 	app = a
-	_ = app
 	return &postgresDBRepo{
 		App: a,
 		DB:  Conn,
